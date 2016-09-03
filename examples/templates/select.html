@@ -1,0 +1,15 @@
+<html>
+    <head>
+        <title>Select</title>
+    </head>
+    <body>
+        <form method="POST">
+            <select name="files" multiple>
+                {% for filename in filenames %}
+                    <option value="{{ filename }}">{{ filename }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit">Submit</button>
+        </form>
+    </body>
+</html>
