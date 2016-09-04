@@ -194,9 +194,9 @@ class Watcher(object):
             with self._outputs_lock:
                 if filename in self._outputs:
                     if digest_time > self._outputs[filename][1]:
-                        self._outputs[fileanme] = (results[digest], digest_time)
+                        self._outputs[filename] = (result, digest_time)
                 else:
-                    self._outputs[filename] = (results[digest], digest_time)
+                    self._outputs[filename] = (result, digest_time)
 
         def wait_and_requeue(filename):
             """Launch a background thread to requeue the specified file later"""
@@ -205,7 +205,7 @@ class Watcher(object):
                 time.sleep(self._requeue_secs)
                 self._queue.put((PRIORITY_REQUEUE, filename))
             # Run the requeuer in a seperate thread
-            requeuer_thread = threading.Thread(target=requeuer, args=filename)
+            requeuer_thread = threading.Thread(target=requeuer, args=(filename,))
             requeuer_thread.daemon = True
             requeuer_thread.start()
 
