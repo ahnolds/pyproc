@@ -194,7 +194,7 @@ class Watcher(object):
             """Launch a background thread to requeue the specified file later"""
             def requeuer(filename):
                 """Wait the specified amount of time and the requeue the file"""
-                time.sleep(self._requeue_secs):
+                time.sleep(self._requeue_secs)
                 self._queue.put((PRIORITY_REQUEUE, filename))
             # Run the requeuer in a seperate thread
             requeuer_thread = threading.Thread(target=requeuer, args=filename)
@@ -229,7 +229,7 @@ class Watcher(object):
                 #       when we saw that it wasn't in results and when we saw
                 #       that it was in seen, but at worst this adds one cycle.
                 if currently_being_processed:
-                    wait_and_requeue(filename):
+                    wait_and_requeue(filename)
                     continue
                 # At this point, this is the first time seeing this digest
                 try:
