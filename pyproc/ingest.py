@@ -1,5 +1,6 @@
 import inotify.adapters
 import inotify.constants
+import logging
 import os
 import Queue
 import threading
@@ -10,8 +11,10 @@ from .digest import get_hash
 # Priorities for the priority queue
 PRIORITY_REQUEST = 0
 PRIORITY_ORIGINAL = 1
-PRIORITY_INOTIFY = 2
+PRIORITY_UPDATED = 2
 PRIORITY_REQUEUE = 3
+
+_LOGGER = logging.getLogger(__name__)
 
 class Watcher(object):
     """A Watcher monitors a directory and handles all files below it"""
@@ -53,24 +56,31 @@ class Watcher(object):
         # Enqueue the file with top priority
         self._queue.put((PRIORITY_REQUEST, filename))
 
-    def _watch_dir(self):
+    def _watch_dir(self, use_inotify):
         """Watch for changes in the watched directory
 
         Any files already in the directory are enqueued with PRIORITY_ORIGINAL,
         and any files for which changes are subsequently detected are enqueued
-        with PRIORITY_INOTIFY.
-
-        CAUTION: This may not work properly if the watched directory is on a
-                 network filesystem, a Docker mounted volume, or other similar
-                 edge cases.
+        with PRIORITY_UPDATED.
         """
-        # Add all files initially below the directory to the queue
-        for (dirpath, dirnames, filenames) in os.walk(self._watched_dir):
-            for name in filenames:
-                self._queue.put((PRIORITY_ORIGINAL, os.path.join(dirpath, name)))
+
+        def walk_directory(priority):
+            """Add all files below the directory to the queue"""
+            for (dirpath, dirnames, filenames) in os.walk(self._watched_dir):
+                for name in filenames:
+                    self._queue.put((priority, os.path.join(dirpath, name)))
+
+        # Add any files initially in the directory
+        walk_directory(PRIORITY_ORIGINAL)
 
         def inotify_watcher():
-            """Use inotify to watch for changes in the directory"""
+            """Use inotify to watch for changes in the directory
+
+            In certain cases, the inotify-based watcher will not work correctly
+            (for example, network filesystems, pseudo-filesystems like /proc,
+            and volumes shared into a virtual machine). In this case, users
+            would have to fall back to the periodic-directory-walk approach.
+            """
             # Watch for files being closed after being written
             mask  = inotify.constants.IN_CLOSE_WRITE
             # Watch for attribute changes (like permission changes)
@@ -103,12 +113,30 @@ class Watcher(object):
                     # Some other event type we aren't interested in
                     continue
                 # Put this file in the queue
-                self._queue.put((PRIORITY_INOTIFY, full_filename))
+                self._queue.put((PRIORITY_UPDATED, full_filename))
 
-        # TODO support for a non-inotify based watcher for the edge cases
+        def walk_and_sleep_watcher(delay_seconds=60):
+            """Periodically walk the directory to watch for changes
+
+            This is generally inferior to the inotify-based watcher, since it
+            lacks an easy way to tell if a file has been changed. To ensure
+            it doesn't miss a file change, it simply requeues all the files on
+            each pass. If the file hasn't changed, then the hash will be the
+            same and the copy will be dropped relatively quickly, but the cost
+            of hashing each file frequently can rapidly become non-trivial.
+
+            However, in certain cases, the inotify-based watcher will not work
+            correctly (for example, network filesystems, pseudo-filesystems like
+            /proc, and volumes shared into a virtual machine). In this case,
+            users would have to fall back to this approach.
+            """
+            while True:
+                walk_directory(PRIORITY_UPDATED)
+                time.sleep(delay_seconds)
 
         # Run the watcher in a seperate thread
-        watch_thread = threading.Thread(target=inotify_watcher, name='watcher')
+        target = inotify_watcher if use_inotify else walk_and_sleep_watcher
+        watch_thread = threading.Thread(target=target, name='watcher')
         watch_thread.daemon = True
         watch_thread.start()
 
@@ -204,10 +232,18 @@ class Watcher(object):
                     wait_and_requeue(filename):
                     continue
                 # At this point, this is the first time seeing this digest
-                # TODO handle exceptions raised from _handler_func
-                result = self._handler_func(filename)
-                set_output(filename, result, digest_time)
-                results[digest] = result
+                try:
+                    result = self._handler_func(filename)
+                except:
+                    # Something failed, allow retries for other files
+                    with seen_lock:
+                        seen.remove(digest)
+                    # Log the failure
+                    _LOGGER.exception('Caught exception for {}, skipping'.format(filename))
+                else:
+                    # The handler succeeded, set the result
+                    set_output(filename, result, digest_time)
+                    results[digest] = result
 
         # Start threads to run the reader
         for num in range(num_threads):
