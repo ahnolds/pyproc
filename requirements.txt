@@ -1,2 +1,2 @@
-inotify
-pyhash
+inotify>=0.2.2
+pyhash>=0.6
