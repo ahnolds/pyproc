@@ -9,10 +9,7 @@ def dummy_handler(filename):
     import uuid
     time.sleep(1)
     return str(uuid.uuid4())
-# Add the dummy file handler
-pyproc.add_file_handler('dummy', dummy_handler)
-# Watch the sample directory
-pyproc.watch_dir('/tmp/watched')
+watcher = pyproc.Watcher('/tmp/watched', dummy_handler)
 
 # Set up the flask app
 app = Flask(__name__)
@@ -28,16 +25,16 @@ def select():
     if request.method == 'POST':
         # Explicitly request all the relevant files to move them up the queue
         for filename in request.form.getlist('files'):
-            pyproc.enqueue_file(filename)
+            watcher.enqueue_file(filename)
         return redirect('/select')
     else: # GET
-        filenames = pyproc.all_available()
+        filenames = watcher.all_available()
         return render_template("select.html", filenames=filenames)
 
 @app.route('/status/<filename>')
 def status():
     """Get the status of the given item"""
-    return {'dummy': pyproc.get_handler_output(filename, 'dummy')}
+    return {'dummy': watcher[filename]}
 
 @app.route('/results')
 def results():
