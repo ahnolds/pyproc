@@ -1,16 +1,14 @@
 #!/usr/bin/env python
 
+# Import Flask for the web component
 from flask import Flask, jsonify, request, render_template, redirect
+# Import pyproc.Watcher to watch the specified directory and handle files in it
+from pyproc import Watcher
+# Import the (dummy) processor to call on all watched files
+import dummy_processor
 
-import pyproc
-
-def dummy_handler(filename):
-    """A dummy file handler"""
-    import time
-    import uuid
-    time.sleep(10)
-    return str(uuid.uuid4())
-watcher = pyproc.Watcher('/tmp/watched', dummy_handler)
+# Create a watcher to call dummy_processor.handler on all files in /tmp/watched
+watcher = Watcher('/tmp/watched', dummy_processor.handler)
 
 # Set up the flask app
 app = Flask(__name__)
@@ -36,25 +34,32 @@ def select():
 def status():
     """Get the status of the given item
 
+    Always returns a json blob with one text field named "msg". The status code
+    identifies the status of the file:
+        * 200: done processing
+        * 202: not yet done processing
+        * 404: not being watched/processed
+        * 400: no file specified
+
     Note that this does not enqueue the queried files, and is meant to check the
     status of enqueued files after a call to select
     """
     # Get the filename and make sure it was given
     filename = request.args.get('filename')
     if filename is None:
-        return jsonify(message='Please specify a filename'), 400
+        return jsonify(msg='Please specify a filename'), 400
     # Check if the file is being watched
     if filename not in watcher.all_available():
-        return jsonify(message='The requested file is not being watched'), 404
+        return jsonify(msg='The requested file is not being watched'), 404
     # See if the file is processed yet
     try:
         result = watcher[filename]
     except KeyError:
         # Not yet done processing
-        return jsonify(message='The requested file is being processed'), 202
+        return jsonify(msg='The requested file has not yet been processed'), 202
     else:
         # The file is available, return it
-        return jsonify(value=watcher[filename])
+        return jsonify(msg='The result is available')
 
 @app.route('/results')
 def results():
