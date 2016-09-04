@@ -1,13 +1,14 @@
 #!/usr/bin/env python
 
-from flask import Flask, request, render_template, redirect
+from flask import Flask, jsonify, request, render_template, redirect
+
 import pyproc
 
 def dummy_handler(filename):
     """A dummy file handler"""
     import time
     import uuid
-    time.sleep(1)
+    time.sleep(10)
     return str(uuid.uuid4())
 watcher = pyproc.Watcher('/tmp/watched', dummy_handler)
 
@@ -28,13 +29,32 @@ def select():
             watcher.enqueue_file(filename)
         return redirect('/select')
     else: # GET
-        filenames = watcher.all_available()
+        filenames = sorted(watcher.all_available())
         return render_template("select.html", filenames=filenames)
 
-@app.route('/status/<filename>')
+@app.route('/status')
 def status():
-    """Get the status of the given item"""
-    return {'dummy': watcher[filename]}
+    """Get the status of the given item
+
+    Note that this does not enqueue the queried files, and is meant to check the
+    status of enqueued files after a call to select
+    """
+    # Get the filename and make sure it was given
+    filename = request.args.get('filename')
+    if filename is None:
+        return jsonify(message='Please specify a filename'), 400
+    # Check if the file is being watched
+    if filename not in watcher.all_available():
+        return jsonify(message='The requested file is not being watched'), 404
+    # See if the file is processed yet
+    try:
+        result = watcher[filename]
+    except KeyError:
+        # Not yet done processing
+        return jsonify(message='The requested file is being processed'), 202
+    else:
+        # The file is available, return it
+        return jsonify(value=watcher[filename])
 
 @app.route('/results')
 def results():
