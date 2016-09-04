@@ -20,7 +20,8 @@ class Watcher(object):
     """A Watcher monitors a directory and handles all files below it"""
 
     def __init__(self, dirname, handler, num_reader_threads=4,
-                 requeue_sleep_secs=1):
+                 requeue_sleep_secs=1, use_inotify=True,
+                 walk_watcher_delay_secs=60):
         """Construct a new Watcher
 
         Arguments
@@ -30,18 +31,25 @@ class Watcher(object):
                                 file queue and call the handler from
             requeue_sleep_secs: The number of seconds to sleeep when requeuing
                                 a file that is being processed in another thread
+            use_inotify: Whether to use the inotify-based directory watcher
+                         rather than the less efficient but sometimes more
+                         reliable directory-walk-based watcher
+            walk_watcher_delay_secs: The number of seconds to sleep between
+                                     directory walks (only relevant if using the
+                                     directory-walk-based watcher)
         """
         self._watched_dir = dirname
         self._handler_func = handler
         self._requeue_secs = requeue_sleep_secs
         self._outputs = {}
         self._outputs_lock = threading.Lock()
+        self._walk_delay_secs = walk_watcher_delay_secs
 
         # Get a queue to store the files in
         self._queue = Queue.PriorityQueue()
 
         # Start watching
-        self._watch_dir()
+        self._watch_dir(use_inotify)
 
         # Start reading
         self._read_queue(num_reader_threads)
@@ -115,7 +123,7 @@ class Watcher(object):
                 # Put this file in the queue
                 self._queue.put((PRIORITY_UPDATED, full_filename))
 
-        def walk_and_sleep_watcher(delay_seconds=60):
+        def walk_and_sleep_watcher():
             """Periodically walk the directory to watch for changes
 
             This is generally inferior to the inotify-based watcher, since it
@@ -132,7 +140,7 @@ class Watcher(object):
             """
             while True:
                 walk_directory(PRIORITY_UPDATED)
-                time.sleep(delay_seconds)
+                time.sleep(self._walk_delay_secs)
 
         # Run the watcher in a seperate thread
         target = inotify_watcher if use_inotify else walk_and_sleep_watcher
