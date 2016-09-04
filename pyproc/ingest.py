@@ -182,9 +182,7 @@ class Watcher(object):
         If the handler has not yet been run on the file, raises KeyError
         """
         with self._outputs_lock:
-            if filename in self._outputs:
-                return self._outputs[filename][0]
-        raise KeyError('Handler has not been run on {}'.format(filename))
+            return self._outputs[filename][0]
 
     def _read_queue(self, num_threads):
         """Get files from the queue forever"""
