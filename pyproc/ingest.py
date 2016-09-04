@@ -17,7 +17,20 @@ PRIORITY_REQUEUE = 3
 _LOGGER = logging.getLogger(__name__)
 
 class Watcher(object):
-    """A Watcher monitors a directory and handles all files below it"""
+    """A Watcher monitors a directory and handles all files below it
+
+    Note: The behavior of this Watcher is not guaranteed to be correct during
+          periods where the files are changing, especilly if the changes occur
+          more frequently than the files can be processed. However, the end
+          result once files are no longer changing (and once the handler has
+          caught up to the changes) is guaranteed to be correct.
+    Caution: If the timestamps on the files are being actively changed (e.g. via
+             the utime system call), then outputs may not be reliable,
+             especially on Windows platforms where st_ctime is the creation time
+             rather than the time of last metadata change.
+    Caution: If the handler function has varying behavior depending on the file
+             permissions, this will not work properly.
+    """
 
     def __init__(self, dirname, handler, num_reader_threads=4,
                  requeue_sleep_secs=1, use_inotify=True,
@@ -188,9 +201,6 @@ class Watcher(object):
             digest associated with the previous result. If there isn't yet an
             output for this file, just set it and store the given time.
             """
-
-            # TODO Is this implicitly assuming that the digest and output were
-            #      computed in the same (i.e. interleaved) order between threads?
             with self._outputs_lock:
                 if filename in self._outputs:
                     if digest_time > self._outputs[filename][1]:
@@ -251,7 +261,17 @@ class Watcher(object):
                 else:
                     # The handler succeeded, set the result
                     set_output(filename, result, digest_time)
-                    results[digest] = result
+                    # Check the file change times
+                    stats = os.stat(filename)
+                    modtime = max(stats.st_mtime, stats.st_ctime)
+                    if modtime > digest_time:
+                        # The file was changed between digest calculation and
+                        # processing completion, so the processed file may not
+                        # match the digest - don't cache this result
+                        seen.remove(digest)
+                    else:
+                        # The file hasn't been changed - cache this result
+                        results[digest] = result
 
         # Start threads to run the reader
         for num in range(num_threads):
